@@ -6,6 +6,13 @@ import IPython
 from decimal import Decimal
 
 
+class EasyDict(dict):
+    def __init__(self, *args, **kwargs):
+        super(EasyDict, self).__init__(*args, **kwargs)
+        self.__dict__ = self
+
+
+
 def resize_tensor(image, image_size, mode='bicubic', align_corners=True):
     assert isinstance(image_size, tuple), 'Error: image_size must be a tuple'
     _, _, h1, w1 = image.shape
