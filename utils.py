@@ -5,10 +5,12 @@ from PIL import Image
 import IPython
 from decimal import Decimal
 
-
-
-
 from neuralarttools.util import *
+
+class EasyDict(dict):
+    def __init__(self, *args, **kwargs):
+        super(EasyDict, self).__init__(*args, **kwargs)
+        self.__dict__ = self
 
 
 def resize_tensor(image, image_size, mode='bicubic', align_corners=True):
