@@ -5,12 +5,12 @@ from PIL import Image
 import IPython
 from decimal import Decimal
 
+from neuralarttools.util import *
 
 class EasyDict(dict):
     def __init__(self, *args, **kwargs):
         super(EasyDict, self).__init__(*args, **kwargs)
         self.__dict__ = self
-
 
 
 def resize_tensor(image, image_size, mode='bicubic', align_corners=True):
@@ -104,3 +104,5 @@ def maybe_save_preview(img, t, save_iter, num_iterations, output_path):
     #output_filename = output_filename.replace('results', 'results/preview')
     filename = '%s_%04d%s' % (output_filename, t, file_extension)
     save(deprocess(img), filename)
+
+    
