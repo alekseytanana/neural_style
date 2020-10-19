@@ -15,6 +15,12 @@ def log(message, verbose=True):
         return
     print(message)
 
+    
+def warn(condition, message, verbose=True):
+    if not condition:
+        return
+    log('Warning: %s' % message, verbose)
+    
 
 def get_style_image_paths(style_image_input):
     style_image_list = []

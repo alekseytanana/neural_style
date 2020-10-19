@@ -79,7 +79,15 @@ def save(img, filename):
         img = Image.fromarray(img.astype(np.uint8)).convert('RGB')
     img.save(str(filename))
 
+    
+def display(img):
+    if isinstance(img, list):
+        return frames_to_movie(img, fps=30)
+    if isinstance(img, np.ndarray):
+        img = Image.fromarray(img.astype(np.uint8)).convert('RGB')
+    IPython.display.display(img)
 
+    
 def resize_tensor(image, image_size, mode='bicubic', align_corners=True):
     assert isinstance(image_size, tuple), 'Error: image_size must be a tuple'
     _, _, h1, w1 = image.shape
