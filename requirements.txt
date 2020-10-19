@@ -6,5 +6,4 @@ scipy
 numpy
 opencv-python
 imageio
-moviepy
-git+https://github.com/genekogan/neural-art-tools
+

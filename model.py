@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 from CaffeLoader import loadCaffemodel
 from utils import *
-from neuralarttools.util import *
+#from neuralarttools.util import *
 
 
 default_tv_weight = 1e-3
@@ -68,8 +68,12 @@ class StyleNet(torch.nn.Module):
         self.style_masks_orig = None
         self.dtype, self.multidevice, self.backward_device = dtype, multidevice, backward_device
         self.content_losses, self.style_losses, self.hist_losses, self.tv_losses = [], [], [], []
-        self.set_params_default()
         self.verbose = verbose
+        self.tv_weight = default_tv_weight
+        self.content_weight = default_content_weight
+        self.style_weight = default_style_weight
+        self.hist_weight = default_hist_weight
+        self.style_stat = default_style_stat
 
         content_layers = params.content_layers.split(',')
         style_layers = params.style_layers.split(',')
