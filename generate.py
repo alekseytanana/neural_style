@@ -1,6 +1,5 @@
 import torch
-from model import *
-from image import *
+from stylenet import *
 from utils import *
 
 

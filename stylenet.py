@@ -4,7 +4,6 @@ import torch.utils.cpp_extension
 import torch.nn as nn
 import torch.optim as optim
 from CaffeLoader import loadCaffemodel
-from image import *
 from utils import *
 
 
