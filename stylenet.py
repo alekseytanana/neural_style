@@ -73,6 +73,7 @@ class StyleNet(torch.nn.Module):
         self.style_weight = default_style_weight
         self.hist_weight = default_hist_weight
         self.style_stat = default_style_stat
+        self.save_parameters()
 
         content_layers = params.content_layers.split(',')
         style_layers = params.style_layers.split(',')
@@ -159,6 +160,22 @@ class StyleNet(torch.nn.Module):
         self.set_style_statistic(default_style_stat)
 
         
+    def save_parameters(self):
+        self.saved_tv_weight = self.tv_weight
+        self.saved_content_weight = self.content_weight
+        self.saved_style_weight = self.style_weight
+        self.saved_hist_weight = self.hist_weight
+        self.saved_style_stat = self.style_stat
+        
+        
+    def restore_parameters(self):
+        self.tv_weight = self.saved_tv_weight
+        self.content_weight = self.saved_content_weight
+        self.style_weight = self.saved_style_weight
+        self.hist_weight = self.saved_hist_weight
+        self.style_stat = self.saved_style_stat
+        
+    
     def __setup_multi_device(self, gpu, multidevice_strategy):
         from CaffeLoader import ModelParallel
         self.multidevice = True
@@ -255,8 +272,8 @@ class StyleNet(torch.nn.Module):
 
     def __setup_style_masks__(self, style_images):            
         if self.style_masks == None:
-            self.style_masks  = [torch.ones(style_images[i].shape).type(self.dtype) 
-                                 for i in range(self.num_styles)]
+            self.style_masks = [torch.ones(style_images[i].shape).type(self.dtype) 
+                                for i in range(self.num_styles)]
         style_masks = []
         for i in range(self.num_styles):
             tmp_table = []

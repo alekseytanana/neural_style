@@ -8,7 +8,9 @@ _stylenet_config_keys_ = [
     'size', 'content_image', 'style_images', 
     'style_image', 'content_masks', 'style_blend_weights', 
     'num_octaves', 'style_scale', 'num_iterations', 
-    'octave_ratio', 'original_colors']
+    'octave_ratio', 'original_colors',
+    'tv_weight', 'content_weight', 'style_weight', 'hist_weight', 'style_stat'
+]
 
 
 def optimize(stylenet, 
@@ -49,10 +51,7 @@ def optimize(stylenet,
     return img
 
 
-
-# maybe content_weight, style_weight etc. save old ones
-# how to handle update_iter, save_preview as args (verbose?)
-def style_transfer(stylenet, config, input_image=None, verbose=False):
+def style_transfer(stylenet, config, img=None, verbose=False):
     cfg = EasyDict(config)
 
     cfg.size = cfg.size if 'size' in cfg else 512
@@ -71,6 +70,13 @@ def style_transfer(stylenet, config, input_image=None, verbose=False):
     cfg.num_iterations = cfg.num_iterations * cfg.num_octaves if len(cfg.num_iterations) == 1 else cfg.num_iterations
     cfg.octave_ratio = float(cfg.octave_ratio) if 'octave_ratio' in cfg else 1.0
     cfg.original_colors = cfg.original_colors if 'original_colors' in cfg else False
+    cfg.tv_weight = cfg.tv_weight if 'tv_weight' in cfg else default_tv_weight
+    cfg.content_weight = cfg.content_weight if 'content_weight' in cfg else default_content_weight
+    cfg.style_weight = cfg.style_weight if 'style_weight' in cfg else default_style_weight
+    cfg.hist_weight = cfg.hist_weight if 'hist_weight' in cfg else default_hist_weight
+    cfg.style_stat = cfg.style_stat if 'style_stat' in cfg else default_style_stat
+    
+    print("CONTENT WEIGHT", cfg.content_weight, "TV WEIGHT", cfg.tv_weight)
 
     # checks
     extraneous_keys = [k for k in cfg.keys() if k not in _stylenet_config_keys_]
@@ -80,7 +86,7 @@ def style_transfer(stylenet, config, input_image=None, verbose=False):
          'Multi-resolution (num_octaves>1) but octave_ratio is 1.0', verbose)
     assert 'style_image' in cfg or 'style_images' in cfg, \
         'Error: must specify at least one style image'
-    assert not (stylenet.get_content_weight() > 0 and cfg.content_image is None), \
+    assert not (cfg.content_weight > 0 and cfg.content_image is None), \
         'Error: if no content image provided, content_weight must be 0'
     assert cfg.style_blend_weights is None or len(cfg.style_blend_weights) == len(cfg.style_images), \
         'Error: number of style_blend_weights elements must match number of styles'
@@ -99,9 +105,6 @@ def style_transfer(stylenet, config, input_image=None, verbose=False):
         content_image_orig = cfg.content_image
         cfg.size = get_size(content_image_orig)  ### is this right??????
 
-        
-        
-        
     # load original style images, and save aspect ratios
     max_size = max(cfg.size) if isinstance(cfg.size, tuple) else cfg.size
     style_images_orig = [load_image(image, int(max_size * max(cfg.style_scale))) 
@@ -117,10 +120,10 @@ def style_transfer(stylenet, config, input_image=None, verbose=False):
         content_masks_orig = None
 
     # load initial input image
-    if input_image is None:
+    if img is None:
         img = random_tensor_like(content_image_orig)
     else:
-        img = preprocess(input_image)
+        img = preprocess(img)
     
     # calculate image sizes
     if isinstance(cfg.size, tuple):
@@ -133,6 +136,14 @@ def style_transfer(stylenet, config, input_image=None, verbose=False):
                         int(cfg.size * (cfg.octave_ratio ** -s))) 
                        for s in reversed(range(cfg.num_octaves))]
     
+    # push stylenet hyperparameters
+    stylenet.save_parameters()
+    stylenet.set_tv_weight(cfg.tv_weight)
+    stylenet.set_content_weight(cfg.content_weight)
+    stylenet.set_style_weight(cfg.style_weight)
+    stylenet.set_hist_weight(cfg.hist_weight)
+    stylenet.set_style_statistic(cfg.style_stat)
+
     # go through each octave
     for image_size, num_iterations, style_scale in zip(image_sizes, cfg.num_iterations, cfg.style_scale):
 
@@ -150,6 +161,8 @@ def style_transfer(stylenet, config, input_image=None, verbose=False):
                              for mask in content_masks_orig]
         else:
             content_masks = None
+            
+        print("my cw =", stylenet.get_content_weight())
 
         # capture the style and content images
         stylenet.capture(content_image, 
@@ -172,5 +185,8 @@ def style_transfer(stylenet, config, input_image=None, verbose=False):
     # change back to original colors of content image
     if cfg.original_colors and cfg.content_image is not None:
         img = original_colors(content_image, img)
+    
+    # pop stylenet hyperparameters
+    stylenet.restore_parameters()
         
     return img
