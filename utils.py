@@ -121,6 +121,8 @@ def random_tensor_like(base_image):
 def preprocess(image, image_size=None, to_normalize=True):
     if isinstance(image, str):
         image = Image.open(image).convert('RGB')
+    elif isinstance(image, np.ndarray):
+        image = Image.fromarray(image.astype(np.uint8)).convert('RGB')
     if image_size is None:
         image_size = (image.height, image.width)
     elif type(image_size) is not tuple:
