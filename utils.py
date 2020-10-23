@@ -39,6 +39,12 @@ def load_image(image, image_size=None, to_numpy=False, normalize=False):
     return image
 
 
+def mask_to_image(mask):
+    mask = (255.0 * mask).astype(np.uint8)
+    mask_pil = Image.fromarray(mask).convert('RGB')
+    return mask_pil
+
+
 def get_size(image):
     if isinstance(image, str):
         image = load_image(image, 1024)

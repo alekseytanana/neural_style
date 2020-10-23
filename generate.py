@@ -76,8 +76,6 @@ def style_transfer(stylenet, config, img=None, verbose=False):
     cfg.hist_weight = cfg.hist_weight if 'hist_weight' in cfg else default_hist_weight
     cfg.style_stat = cfg.style_stat if 'style_stat' in cfg else default_style_stat
     
-    print("CONTENT WEIGHT", cfg.content_weight, "TV WEIGHT", cfg.tv_weight)
-
     # checks
     extraneous_keys = [k for k in cfg.keys() if k not in _stylenet_config_keys_]
     assert len(extraneous_keys) == 0, \
@@ -110,12 +108,19 @@ def style_transfer(stylenet, config, img=None, verbose=False):
     style_images_orig = [load_image(image, int(max_size * max(cfg.style_scale))) 
                                     for image in cfg.style_images]
     style_images_aspect = [get_aspect_ratio(image) for image in style_images_orig]
-    
+
     # load original content masks
     if cfg.content_masks is not None:
-        cfg.content_masks = cfg.content_masks if isinstance(cfg.content_masks, list) else [cfg.content_masks]
-        content_masks_orig = [load_image(mask, cfg.size) 
-                              for mask in cfg.content_masks]
+        if isinstance(cfg.content_masks, np.ndarray):
+            num_masks = cfg.content_masks.shape[-1]
+            content_masks_orig = [mask_to_image(cfg.content_masks[:,:,m]) 
+                                  for m in range(num_masks)]
+        else:
+            cfg.content_masks = cfg.content_masks if isinstance(cfg.content_masks, list) else [cfg.content_masks]
+            content_masks_orig = [load_image(mask, cfg.size) 
+                                  for mask in cfg.content_masks]
+        assert len(content_masks_orig) == len(cfg.style_images), \
+            'Error: Number of content masks (%d) != number of styles (%d)' % (len(content_masks_orig), len(cfg.style_images))
     else:
         content_masks_orig = None
 
@@ -156,13 +161,12 @@ def style_transfer(stylenet, config, img=None, verbose=False):
                                        int(max(image_size) * style_scale / aspect))) 
                         for image, aspect in zip(style_images_orig, style_images_aspect)]
         
+        # produce masks at current octave size
         if content_masks_orig is not None:
             content_masks = [resize(mask, image_size) 
                              for mask in content_masks_orig]
         else:
             content_masks = None
-            
-        print("my cw =", stylenet.get_content_weight())
 
         # capture the style and content images
         stylenet.capture(content_image, 
