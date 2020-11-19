@@ -61,13 +61,13 @@ def style_transfer(stylenet, config, img=None, verbose=False):
     cfg.style_images = cfg.style_images if isinstance(cfg.style_images, list) else [cfg.style_images]
     cfg.content_masks = cfg.content_masks if 'content_masks' in cfg else None 
     cfg.style_blend_weights = cfg.style_blend_weights if 'style_blend_weights' in cfg else None
-    cfg.num_octaves = int(cfg.num_octaves) if 'num_octaves' in cfg else 1
+    cfg.num_iterations = cfg.num_iterations if 'num_iterations' in cfg else 1000
+    cfg.num_iterations = cfg.num_iterations if isinstance(cfg.num_iterations, list) else [cfg.num_iterations]    
+    cfg.num_octaves = int(cfg.num_octaves) if 'num_octaves' in cfg else len(cfg.num_iterations)
+    cfg.num_iterations = cfg.num_iterations * cfg.num_octaves if len(cfg.num_iterations) == 1 else cfg.num_iterations
     cfg.style_scale = cfg.style_scale if 'style_scale' in cfg else 1.0
     cfg.style_scale = cfg.style_scale if isinstance(cfg.style_scale, list) else [cfg.style_scale]
     cfg.style_scale = cfg.style_scale * cfg.num_octaves if len(cfg.style_scale) == 1 else cfg.style_scale
-    cfg.num_iterations = cfg.num_iterations if 'num_iterations' in cfg else 1000
-    cfg.num_iterations = cfg.num_iterations if isinstance(cfg.num_iterations, list) else [cfg.num_iterations]
-    cfg.num_iterations = cfg.num_iterations * cfg.num_octaves if len(cfg.num_iterations) == 1 else cfg.num_iterations
     cfg.octave_ratio = float(cfg.octave_ratio) if 'octave_ratio' in cfg else 1.0
     cfg.original_colors = cfg.original_colors if 'original_colors' in cfg else False
     cfg.tv_weight = cfg.tv_weight if 'tv_weight' in cfg else default_tv_weight
