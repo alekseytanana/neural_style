@@ -92,16 +92,13 @@ def style_transfer(stylenet, config, img=None, verbose=False):
         'Error: num_octaves does not match length of num_iterations or style_scale lists'
 
     # load original content image
-    if 'content_image' not in cfg or cfg.content_image is None:
+    if cfg.content_image is None:
         assert isinstance(cfg.size, tuple), \
             'Error: If no content image provided, config.size must be a full tuple (width, height)'
         content_image_orig = deprocess(random_tensor(cfg.size[0], cfg.size[1]))
-    elif cfg.content_image is not None and isinstance(cfg.content_image, str):
-        content_image_orig = load_image(cfg.content_image, cfg.size)
-        cfg.size = get_size(content_image_orig)  ### is this right??????
     else:
-        content_image_orig = cfg.content_image
-        cfg.size = get_size(content_image_orig)  ### is this right??????
+        content_image_orig = load_image(cfg.content_image, cfg.size)
+        cfg.size = get_size(content_image_orig)  
 
     # load original style images, and save aspect ratios
     max_size = max(cfg.size) if isinstance(cfg.size, tuple) else cfg.size
