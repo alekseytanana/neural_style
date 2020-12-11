@@ -4,7 +4,7 @@ from utils import *
 
 
 
-_stylenet_config_keys_ = [
+_stylenet_config_keys_ = [ 'type',
     'size', 'content_image', 'style_images', 
     'style_image', 'content_masks', 'style_blend_weights', 
     'num_octaves', 'style_scale', 'num_iterations', 
