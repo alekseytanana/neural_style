@@ -1,4 +1,5 @@
 import copy
+import math 
 import torch
 import torch.utils.cpp_extension
 import torch.nn as nn
@@ -138,7 +139,9 @@ class StyleNet(torch.nn.Module):
                     r += 1
 
                 if isinstance(layer, nn.MaxPool2d) or isinstance(layer, nn.AvgPool2d):
-                    net.add_module(str(len(net)), layer)
+                    #net.add_module(str(len(net)), layer)
+                    net.add_module(str(len(net)), maxpool2d_blurred_layer)
+                    
         
         self.net = net
         log(self.net, self.verbose)
@@ -311,7 +314,8 @@ class StyleNet(torch.nn.Module):
                 self.content_masks[c] = torch.mean(content_mask.type(self.dtype), axis=1)[0]
 
         for L, layer in enumerate(self.net):
-            if (isinstance(layer, nn.MaxPool2d) or isinstance(layer, nn.AvgPool2d)):
+            #if (isinstance(layer, nn.MaxPool2d) or isinstance(layer, nn.AvgPool2d)):
+            if (isinstance(layer, nn.MaxPool2d) or isinstance(layer, nn.AvgPool2d) or isinstance(layer, MaxPool2d)):
                 if self.content_masks != None:
                     for k in range(self.num_styles):
                         h, w = self.content_masks[k].shape
@@ -756,6 +760,48 @@ class MatchHistogram(nn.Module):
         return self.match(input, source_tensor)
 
 
+    
+######################################################
+# Blurred MaxPool2D (see https://github.com/ProGamerGov/neural-style-pt/issues/71)
+
+class GaussianBlur(nn.Module):
+
+    def __init__(self, kernel_size=6, sigma = math.pi / 2):
+        super().__init__()
+        if type(sigma) is not list and type(sigma) is not tuple:
+            kernel_size = [kernel_size] * 2
+        if type(sigma) is not list and type(sigma) is not tuple:
+            sigma = [sigma] * 2
+
+        kernel = 1
+        meshgrid_tensor = torch.meshgrid([torch.arange(size, dtype=torch.float32) for size in kernel_size])
+
+        for size, std, mgrid in zip(kernel_size, sigma, meshgrid_tensor):
+            kernel *= 1 / (std * math.sqrt(2 * math.pi)) * \
+            torch.exp(-((mgrid - ((size - 1) / 2)) / std) ** 2 / 2)
+        self.kernel = (kernel / torch.sum(kernel)).view(1, 1, *kernel.size()).cuda()
+
+    def forward(self, x):
+        assert x.dim() == 4
+        groups = x.size(1)
+        weight = self.kernel.repeat(groups, * [1] * (self.kernel.dim() - 1))
+        x = torch.nn.functional.pad(x, (3,2,3,2), mode='reflect') # No idea if this is a good idea for keeping input the same size
+        x = torch.nn.functional.conv2d(x, weight=weight, groups=groups)
+        return x
+
+blur_input = GaussianBlur(6, sigma = 0.25)
+
+class MaxPool2d(torch.nn.MaxPool2d):
+    def forward(self, x):
+        x = blur_input(x)
+        x = x.unfold(2, self.kernel_size, self.stride).unfold(3, self.kernel_size, self.stride)
+        x = x.contiguous().view(x.size()[:4] + (-1,))
+        pool, _ = torch.max(x, dim=-1)
+        return pool
+
+maxpool2d_blurred_layer = MaxPool2d(kernel_size=2, stride=2)
+
+
 
 ######################################################
 # TV regularization
@@ -835,4 +881,3 @@ def setup_gpu(params):
         setup_cpu()
         dtype, backward_device = torch.FloatTensor, "cpu"
     return dtype, multidevice, backward_device
-
