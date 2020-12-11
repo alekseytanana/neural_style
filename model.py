@@ -12,6 +12,7 @@ default_content_weight = 5e0
 default_style_weight = 1e2
 default_hist_weight = 0
 default_style_stat = 'gram'
+default_normalize_gradients = False
 
 
 ######################################################
@@ -73,6 +74,7 @@ class StyleNet(torch.nn.Module):
         self.style_weight = default_style_weight
         self.hist_weight = default_hist_weight
         self.style_stat = default_style_stat
+        self.normalize_gradients = default_normalize_gradients
         self.save_parameters()
 
         content_layers = params.content_layers.split(',')
@@ -97,13 +99,13 @@ class StyleNet(torch.nn.Module):
 
                     if layerList['C'][c] in content_layers:
                         log("Setting up content layer " + str(i) + ": " + str(layerList['C'][c]), self.verbose)
-                        loss_module = ContentLoss(self.content_weight)
+                        loss_module = ContentLoss(self.content_weight, self.normalize_gradients)
                         net.add_module(str(len(net)), loss_module)
                         self.content_losses.append(loss_module)
 
                     if layerList['C'][c] in style_layers:
                         log("Setting up style layer " + str(i) + ": " + str(layerList['C'][c]), self.verbose)
-                        loss_module = MaskedStyleLoss(self.style_weight)
+                        loss_module = MaskedStyleLoss(self.style_weight, self.normalize_gradients)
                         net.add_module(str(len(net)), loss_module)
                         self.style_losses.append(loss_module)
                     
@@ -114,21 +116,21 @@ class StyleNet(torch.nn.Module):
 
                     if layerList['R'][r] in content_layers:
                         log("Setting up content layer " + str(i) + ": " + str(layerList['R'][r]), self.verbose)
-                        loss_module = ContentLoss(self.content_weight)
+                        loss_module = ContentLoss(self.content_weight, self.normalize_gradients)
                         net.add_module(str(len(net)), loss_module)
                         self.content_losses.append(loss_module)
                         next_content_idx += 1
 
                     if layerList['R'][r] in style_layers:
                         log("Setting up style layer " + str(i) + ": " + str(layerList['R'][r]), self.verbose)
-                        loss_module = MaskedStyleLoss(self.style_weight)
+                        loss_module = MaskedStyleLoss(self.style_weight, self.normalize_gradients)
                         net.add_module(str(len(net)), loss_module)
                         self.style_losses.append(loss_module)
                         next_style_idx += 1
 
                     if layerList['R'][r] in hist_layers:
                         log("Setting up histogram layer " + str(i) + ": " + str(layerList['R'][r]), self.verbose)
-                        loss_module = MaskedHistLoss(self.hist_weight)
+                        loss_module = MaskedHistLoss(self.hist_weight, self.normalize_gradients)
                         net.add_module(str(len(net)), loss_module)
                         self.hist_losses.append(loss_module)
                         next_hist_idx += 1
@@ -158,6 +160,7 @@ class StyleNet(torch.nn.Module):
         self.set_style_weight(default_style_weight)
         self.set_hist_weight(default_hist_weight)
         self.set_style_statistic(default_style_stat)
+        self.set_normalize_gradients(default_normalize_gradients)
 
         
     def save_parameters(self):
@@ -166,6 +169,7 @@ class StyleNet(torch.nn.Module):
         self.saved_style_weight = self.style_weight
         self.saved_hist_weight = self.hist_weight
         self.saved_style_stat = self.style_stat
+        self.saved_normalize_gradients = self.normalize_gradients
         
         
     def restore_parameters(self):
@@ -174,7 +178,8 @@ class StyleNet(torch.nn.Module):
         self.style_weight = self.saved_style_weight
         self.hist_weight = self.saved_hist_weight
         self.style_stat = self.saved_style_stat
-        
+        self.normalize_gradients = self.saved_normalize_gradients
+    
     
     def __setup_multi_device(self, gpu, multidevice_strategy):
         from CaffeLoader import ModelParallel
@@ -238,6 +243,15 @@ class StyleNet(torch.nn.Module):
         for layer in self.net:
             if isinstance(layer, MaskedStyleLoss):
                 layer.set_statistic(self.style_stat)
+                
+
+    def set_normalize_gradients(self, normalize_gradients):
+        if self.normalize_gradients == normalize_gradients:
+            return
+        self.normalize_gradients = normalize_gradients
+        for layer in self.net:
+            if isinstance(layer, (ContentLoss, MaskedStyleLoss)):
+                layer.set_normalize_gradients(self.normalize_gradients)
 
 
     def get_content_weight(self):
@@ -255,7 +269,10 @@ class StyleNet(torch.nn.Module):
     def get_style_statistic(self):
         return self.style_stat
 
+    def get_normalize_gradients(self):
+        return self.normalize_gradients
 
+    
     def capture(self, content_image, style_images, style_blend_weights=None, content_masks=None, style_masks=None):
         style_images = [style_images] if type(style_images) != list else style_images
         style_images = [preprocess(style_image) for style_image in style_images]
@@ -381,28 +398,9 @@ class StyleNet(torch.nn.Module):
 
 
 
+    
 ######################################################
-# Content Loss module
-
-class ContentLoss(nn.Module):
-
-    def __init__(self, strength):
-        super(ContentLoss, self).__init__()
-        self.strength = strength
-        self.crit = nn.MSELoss()
-        self.mode = 'none'
-
-    def forward(self, input):
-        if self.mode == 'loss':
-            self.loss = self.crit(input, self.target) * self.strength
-        elif self.mode == 'capture':
-            self.target = input.detach()
-        return input
-
-
-
-######################################################
-# Modules for style loss
+# Helper modules
 
 class GramMatrix(nn.Module):
 
@@ -420,6 +418,270 @@ class CovarianceMatrix(nn.Module):
         x_flat = x_flat - x_flat.mean(1).unsqueeze(1)
         return torch.mm(x_flat, x_flat.t())
 
+
+class ScaleGradients(torch.autograd.Function):
+    @staticmethod
+    def forward(self, input_tensor, strength):
+        self.strength = strength
+        return input_tensor
+
+    @staticmethod
+    def backward(self, grad_output):
+        grad_input = grad_output.clone()
+        grad_input = grad_input / (torch.norm(grad_input, keepdim=True) + 1e-8)
+        return grad_input * self.strength * self.strength, None
+
+
+
+######################################################
+# Content Loss module
+
+class ContentLoss(nn.Module):
+
+    def __init__(self, strength, normalize):
+        super(ContentLoss, self).__init__()
+        self.strength = strength
+        self.crit = nn.MSELoss()
+        self.mode = 'none'
+        self.normalize = normalize
+
+    def set_normalize_gradients(self, normalize):
+        self.normalize = normalize
+
+    def forward(self, input):
+        if self.mode == 'loss':
+            loss = self.crit(input, self.target)
+            if self.normalize:
+                loss = ScaleGradients.apply(loss, self.strength)
+            self.loss = loss * self.strength
+        elif self.mode == 'capture':
+            self.target = input.detach()
+        return input
+
+
+
+######################################################
+# Style Loss module (Gram/Covariance loss with masks)
+
+class MaskedStyleLoss(nn.Module):
+
+    def __init__(self, strength, normalize):
+        super(MaskedStyleLoss, self).__init__()
+        self.strength = strength
+        self.crit = nn.MSELoss()
+        self.mode = 'none'
+        self.blend_weight = None
+        self.set_statistic('gram')
+        self.set_masks(None, None)
+        self.normalize = normalize
+
+    def set_normalize_gradients(self, normalize):
+        self.normalize = normalize
+
+    def set_statistic(self, style_stat):
+        if style_stat == 'gram':
+            self.gram = GramMatrix()
+        elif style_stat == 'covariance':
+            self.gram = CovarianceMatrix()
+
+    def set_masks(self, content_masks, style_masks):
+        self.content_masks = copy.deepcopy(content_masks)
+        self.style_masks = copy.deepcopy(style_masks)
+        self.target_grams = []
+        self.masked_grams = []
+        self.masked_features = []
+        self.capture_count = 0
+
+    def forward(self, input):
+        if self.mode == 'capture':
+            if self.style_masks != None:
+                masks = self.style_masks[self.capture_count]
+            else:
+                masks = None
+            self.capture_count += 1
+        elif self.mode == 'loss':
+            masks = self.content_masks
+            self.style_masks = None
+        if self.mode != 'none':
+            if self.strength == 0:
+                self.loss = 0
+                return input
+            loss = 0.0
+            for j in range(self.capture_count):
+                if masks != None:
+                    l_mask_ori = masks[j].clone()
+                    l_mask = l_mask_ori.repeat(1,1,1).expand(input.size())
+                    l_mean = l_mask_ori.mean()
+                    masked_feature = l_mask.mul(input)
+                    masked_gram = self.gram(masked_feature).clone()
+                    if l_mean > 0:
+                        masked_gram = masked_gram.div(input.nelement() * l_mean)
+                else:
+                    l_mean = 1.0
+                    masked_feature = input
+                    masked_gram = self.gram(input).clone()
+                    masked_gram = masked_gram.div(input.nelement())
+                if self.mode == 'capture':
+                    if j >= len(self.target_grams):
+                        self.target_grams.append(masked_gram.detach().mul(self.blend_weight))
+                        self.masked_grams.append(self.target_grams[j].clone())
+                        self.masked_features.append(masked_feature)
+                    else:
+                        self.target_grams[j] += masked_gram.detach().mul(self.blend_weight)
+                elif self.mode == 'loss':
+                    self.masked_grams[j] = masked_gram
+                    self.masked_features[j] = masked_feature
+                    loss_ = self.crit(self.masked_grams[j], self.target_grams[j]) * l_mean
+                    if self.normalize:
+                        loss_ = ScaleGradients.apply(loss_, self.strength)
+
+                    loss += loss_ #loss_self.crit(self.masked_grams[j], self.target_grams[j]) * l_mean# * self.strength
+            self.loss = self.strength * loss                    
+        return input
+
+
+
+######################################################
+# Style Loss module (histogram loss with masks)
+
+class MaskedHistLoss_old(nn.Module):
+
+    def __init__(self, strength, normalize):
+        super(MaskedHistLoss, self).__init__()
+        self.strength = strength
+        self.crit = nn.MSELoss()
+        self.mode = 'none'
+        self.blend_weight = 1.0
+        self.set_masks(None, None)
+        self.normalize = normalize
+
+    def set_masks(self, content_masks, style_masks):
+        self.content_masks = copy.deepcopy(content_masks)
+        self.style_masks = copy.deepcopy(style_masks)
+        self.target_hists = []
+        self.target_maxs = []
+        self.target_mins = []
+        self.capture_count = 0
+
+    def set_normalize_gradients(self, normalize):
+        self.normalize = normalize
+
+    def minmax(self, input):
+        return torch.min(input[0].view(input.shape[1], -1), 1)[0].data.clone(), \
+        torch.max(input[0].view(input.shape[1], -1), 1)[0].data.clone()
+		
+    def calcHist(self, input, target, min_val, max_val):
+        res = input.data.clone() 
+        cpp.matchHistogram(res, target.clone())
+        for c in range(res.size(0)):
+            res[c].mul_(max_val[c] - min_val[c]) 
+            res[c].add_(min_val[c])                      
+        return res.data.unsqueeze(0)
+		
+    def forward(self, input):
+        if self.mode == 'capture':
+            if self.style_masks != None:
+                masks = self.style_masks[self.capture_count]
+            else:
+                masks = None
+            self.capture_count += 1
+        elif self.mode == 'loss':
+            masks = self.content_masks
+            self.style_masks = None
+        if self.mode != 'none':
+            if self.strength == 0:
+                self.loss = 0
+                return input  
+            loss = 0
+            for j in range(self.capture_count):
+                if masks != None:
+                    l_mask_ori = masks[j].clone()
+                    l_mask = l_mask_ori.repeat(1,1,1).expand(input.size())
+                    masked_feature = l_mask.mul(input)
+                else:
+                    masked_feature = input
+                target_min, target_max = self.minmax(masked_feature)
+                target_hist = cpp.computeHistogram(masked_feature[0], 256)
+                if self.mode == 'capture':		
+                    if j >= len(self.target_hists):
+                        self.target_mins.append(target_min)
+                        self.target_maxs.append(target_max)
+                        self.target_hists.append(target_hist.mul(self.blend_weight))
+                    else:
+                        self.target_hists[j] += target_hist.mul(self.blend_weight)
+                        self.target_mins[j] = torch.min(self.target_mins[j], target_min)
+                        self.target_maxs[j] = torch.max(self.target_maxs[j], target_max)
+                elif self.mode == 'loss':
+                    target = self.calcHist(masked_feature[0], self.target_hists[j], self.target_mins[j], self.target_maxs[j])
+                    loss += self.crit(masked_feature, target) # * self.strength
+            if self.normalize:
+                loss = ScaleGradients.apply(loss, self.strength)
+            self.loss = 0.01 * self.strength * loss                 
+
+        return input
+
+
+
+class MaskedHistLoss(nn.Module):
+
+    def __init__(self, strength, normalize):
+        super(MaskedHistLoss, self).__init__()
+        self.strength = strength
+        self.crit = nn.MSELoss()
+        self.mode = 'none'
+        self.blend_weight = 1.0
+        self.set_masks(None, None)
+        self.normalize = normalize
+
+    def set_normalize_gradients(self, normalize):
+        self.normalize = normalize
+
+    def double_mean(self, tensor):
+        tensor = tensor.squeeze(0).permute(2, 1, 0)
+        return tensor.mean(0).mean(0)
+
+    def set_masks(self, content_masks, style_masks):
+        self.content_masks = copy.deepcopy(content_masks)
+        self.style_masks = copy.deepcopy(style_masks)
+        self.targets = []
+        self.capture_count = 0
+		
+    def forward(self, input):
+        if self.mode == 'capture':
+            if self.style_masks != None:
+                masks = self.style_masks[self.capture_count]
+            else:
+                masks = None
+            self.capture_count += 1
+        elif self.mode == 'loss':
+            masks = self.content_masks
+            self.style_masks = None
+        if self.mode != 'none':
+            if self.strength == 0:
+                self.loss = 0
+                return input  
+            loss = 0
+            for j in range(self.capture_count):
+                if masks != None:
+                    l_mask_ori = masks[j].clone()
+                    l_mask = l_mask_ori.repeat(1,1,1).expand(input.size())
+                    masked_feature = l_mask.mul(input)
+                else:
+                    masked_feature = input
+                if self.mode == 'capture':		
+                    target = self.double_mean(masked_feature.detach())      
+                    if j >= len(self.targets):
+                        self.targets.append(target.mul(self.blend_weight))
+                    else:
+                        self.targets[j] += target.mul(self.blend_weight)
+                elif self.mode == 'loss':
+                    loss += self.crit(self.double_mean(masked_feature.clone()), self.targets[j])
+            if self.normalize:
+                loss = ScaleGradients.apply(loss, self.strength)
+            self.loss = self.strength * loss                 
+        return input
+
+    
 
 ######################################################
 # Histogram matching function (unused at the moment)
@@ -492,208 +754,6 @@ class MatchHistogram(nn.Module):
         
     def forward(self, input, source_tensor):     
         return self.match(input, source_tensor)
-
-
-
-######################################################
-# Style Loss module (Gram/Covariance loss with masks)
-
-class MaskedStyleLoss(nn.Module):
-
-    def __init__(self, strength):
-        super(MaskedStyleLoss, self).__init__()
-        self.strength = strength
-        self.crit = nn.MSELoss()
-        self.mode = 'none'
-        self.blend_weight = None
-        self.set_statistic('gram')
-        self.set_masks(None, None)
-
-    def set_statistic(self, style_stat):
-        if style_stat == 'gram':
-            self.gram = GramMatrix()
-        elif style_stat == 'covariance':
-            self.gram = CovarianceMatrix()
-
-    def set_masks(self, content_masks, style_masks):
-        self.content_masks = copy.deepcopy(content_masks)
-        self.style_masks = copy.deepcopy(style_masks)
-        self.target_grams = []
-        self.masked_grams = []
-        self.masked_features = []
-        self.capture_count = 0
-
-    def forward(self, input):
-        if self.mode == 'capture':
-            if self.style_masks != None:
-                masks = self.style_masks[self.capture_count]
-            else:
-                masks = None
-            self.capture_count += 1
-        elif self.mode == 'loss':
-            masks = self.content_masks
-            self.style_masks = None
-        if self.mode != 'none':
-            if self.strength == 0:
-                self.loss = 0
-                return input
-            loss = 0
-            for j in range(self.capture_count):
-                if masks != None:
-                    l_mask_ori = masks[j].clone()
-                    l_mask = l_mask_ori.repeat(1,1,1).expand(input.size())
-                    l_mean = l_mask_ori.mean()
-                    masked_feature = l_mask.mul(input)
-                    masked_gram = self.gram(masked_feature).clone()
-                    if l_mean > 0:
-                        masked_gram = masked_gram.div(input.nelement() * l_mean)
-                else:
-                    l_mean = 1.0
-                    masked_feature = input
-                    masked_gram = self.gram(input).clone()
-                    masked_gram = masked_gram.div(input.nelement())
-                if self.mode == 'capture':
-                    if j >= len(self.target_grams):
-                        self.target_grams.append(masked_gram.detach().mul(self.blend_weight))
-                        self.masked_grams.append(self.target_grams[j].clone())
-                        self.masked_features.append(masked_feature)
-                    else:
-                        self.target_grams[j] += masked_gram.detach().mul(self.blend_weight)
-                elif self.mode == 'loss':
-                    self.masked_grams[j] = masked_gram
-                    self.masked_features[j] = masked_feature
-                    loss += self.crit(self.masked_grams[j], self.target_grams[j]) * l_mean * self.strength
-            self.loss = loss
-        return input
-
-
-
-######################################################
-# Style Loss module (histogram loss with masks)
-
-class MaskedHistLoss_old(nn.Module):
-
-    def __init__(self, strength):
-        super(MaskedHistLoss, self).__init__()
-        self.strength = strength
-        self.crit = nn.MSELoss()
-        self.mode = 'none'
-        self.blend_weight = 1.0
-        self.set_masks(None, None)
-
-    def set_masks(self, content_masks, style_masks):
-        self.content_masks = copy.deepcopy(content_masks)
-        self.style_masks = copy.deepcopy(style_masks)
-        self.target_hists = []
-        self.target_maxs = []
-        self.target_mins = []
-        self.capture_count = 0
-
-    def minmax(self, input):
-        return torch.min(input[0].view(input.shape[1], -1), 1)[0].data.clone(), \
-        torch.max(input[0].view(input.shape[1], -1), 1)[0].data.clone()
-		
-    def calcHist(self, input, target, min_val, max_val):
-        res = input.data.clone() 
-        cpp.matchHistogram(res, target.clone())
-        for c in range(res.size(0)):
-            res[c].mul_(max_val[c] - min_val[c]) 
-            res[c].add_(min_val[c])                      
-        return res.data.unsqueeze(0)
-		
-    def forward(self, input):
-        if self.mode == 'capture':
-            if self.style_masks != None:
-                masks = self.style_masks[self.capture_count]
-            else:
-                masks = None
-            self.capture_count += 1
-        elif self.mode == 'loss':
-            masks = self.content_masks
-            self.style_masks = None
-        if self.mode != 'none':
-            if self.strength == 0:
-                self.loss = 0
-                return input  
-            loss = 0
-            for j in range(self.capture_count):
-                if masks != None:
-                    l_mask_ori = masks[j].clone()
-                    l_mask = l_mask_ori.repeat(1,1,1).expand(input.size())
-                    masked_feature = l_mask.mul(input)
-                else:
-                    masked_feature = input
-                target_min, target_max = self.minmax(masked_feature)
-                target_hist = cpp.computeHistogram(masked_feature[0], 256)
-                if self.mode == 'capture':		
-                    if j >= len(self.target_hists):
-                        self.target_mins.append(target_min)
-                        self.target_maxs.append(target_max)
-                        self.target_hists.append(target_hist.mul(self.blend_weight))
-                    else:
-                        self.target_hists[j] += target_hist.mul(self.blend_weight)
-                        self.target_mins[j] = torch.min(self.target_mins[j], target_min)
-                        self.target_maxs[j] = torch.max(self.target_maxs[j], target_max)
-                elif self.mode == 'loss':
-                    target = self.calcHist(masked_feature[0], self.target_hists[j], self.target_mins[j], self.target_maxs[j])
-                    loss += 0.01 * self.strength * self.crit(masked_feature, target)
-            self.loss = loss
-        return input
-
-
-
-class MaskedHistLoss(nn.Module):
-
-    def __init__(self, strength):
-        super(MaskedHistLoss, self).__init__()
-        self.strength = strength
-        self.crit = nn.MSELoss()
-        self.mode = 'none'
-        self.blend_weight = 1.0
-        self.set_masks(None, None)
-
-    def double_mean(self, tensor):
-        tensor = tensor.squeeze(0).permute(2, 1, 0)
-        return tensor.mean(0).mean(0)
-
-    def set_masks(self, content_masks, style_masks):
-        self.content_masks = copy.deepcopy(content_masks)
-        self.style_masks = copy.deepcopy(style_masks)
-        self.targets = []
-        self.capture_count = 0
-		
-    def forward(self, input):
-        if self.mode == 'capture':
-            if self.style_masks != None:
-                masks = self.style_masks[self.capture_count]
-            else:
-                masks = None
-            self.capture_count += 1
-        elif self.mode == 'loss':
-            masks = self.content_masks
-            self.style_masks = None
-        if self.mode != 'none':
-            if self.strength == 0:
-                self.loss = 0
-                return input  
-            loss = 0
-            for j in range(self.capture_count):
-                if masks != None:
-                    l_mask_ori = masks[j].clone()
-                    l_mask = l_mask_ori.repeat(1,1,1).expand(input.size())
-                    masked_feature = l_mask.mul(input)
-                else:
-                    masked_feature = input
-                if self.mode == 'capture':		
-                    target = self.double_mean(masked_feature.detach())      
-                    if j >= len(self.targets):
-                        self.targets.append(target.mul(self.blend_weight))
-                    else:
-                        self.targets[j] += target.mul(self.blend_weight)
-                elif self.mode == 'loss':
-                    loss += self.strength * self.crit(self.double_mean(masked_feature.clone()), self.targets[j])
-            self.loss = loss
-        return input
 
 
 

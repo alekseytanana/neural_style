@@ -137,7 +137,7 @@ def preprocess(image, image_size=None, to_normalize=True):
     rgb2bgr = transforms.Compose([transforms.Lambda(lambda x: x[torch.LongTensor([2,1,0])])])
     if to_normalize:
         Normalize = transforms.Compose([transforms.Normalize(mean=[103.939, 116.779, 123.68], std=[1,1,1])])
-        tensor = Normalize(rgb2bgr(Loader(image) * 256)).unsqueeze(0)
+        tensor = Normalize(rgb2bgr(Loader(image) * 255)).unsqueeze(0)
     else:
         tensor = rgb2bgr(Loader(image)).unsqueeze(0)
     return tensor
@@ -146,7 +146,7 @@ def preprocess(image, image_size=None, to_normalize=True):
 def deprocess(tensor):
     Normalize = transforms.Compose([transforms.Normalize(mean=[-103.939, -116.779, -123.68], std=[1,1,1])])
     bgr2rgb = transforms.Compose([transforms.Lambda(lambda x: x[torch.LongTensor([2,1,0])])])
-    tensor = bgr2rgb(Normalize(tensor.squeeze(0).cpu())) / 256
+    tensor = bgr2rgb(Normalize(tensor.squeeze(0).cpu())) / 255
     tensor.clamp_(0, 1)
     Image2PIL = transforms.ToPILImage()
     image = Image2PIL(tensor.cpu())

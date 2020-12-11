@@ -9,7 +9,8 @@ _stylenet_config_keys_ = [ 'type',
     'style_image', 'content_masks', 'style_blend_weights', 
     'num_octaves', 'style_scale', 'num_iterations', 
     'octave_ratio', 'original_colors',
-    'tv_weight', 'content_weight', 'style_weight', 'hist_weight', 'style_stat'
+    'tv_weight', 'content_weight', 'style_weight', 'hist_weight', 
+    'style_stat', 'normalize_gradients'
 ]
 
 
@@ -75,6 +76,7 @@ def style_transfer(stylenet, config, img=None, verbose=False):
     cfg.style_weight = cfg.style_weight if 'style_weight' in cfg else default_style_weight
     cfg.hist_weight = cfg.hist_weight if 'hist_weight' in cfg else default_hist_weight
     cfg.style_stat = cfg.style_stat if 'style_stat' in cfg else default_style_stat
+    cfg.normalize_gradients = cfg.normalize_gradients if 'normalize_gradients' in cfg else default_normalize_gradients
     
     # checks
     extraneous_keys = [k for k in cfg.keys() if k not in _stylenet_config_keys_]
@@ -145,6 +147,7 @@ def style_transfer(stylenet, config, img=None, verbose=False):
     stylenet.set_style_weight(cfg.style_weight)
     stylenet.set_hist_weight(cfg.hist_weight)
     stylenet.set_style_statistic(cfg.style_stat)
+    stylenet.set_normalize_gradients(cfg.normalize_gradients)
 
     # go through each octave
     for image_size, num_iterations, style_scale in zip(image_sizes, cfg.num_iterations, cfg.style_scale):
