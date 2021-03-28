@@ -1,4 +1,8 @@
-# neural-style-pt
+# neural_style
+
+This is an implementation of [neural style transfer (Gatys 2016)](http://arxiv.org/abs/1508.06576), with [spatial control (Gatys 2017)](https://arxiv.org/abs/1611.07865). The code is based on [ProGamerGov's PyTorch rewrite](https://github.com/ProGamerGov/neural-style-pt) of [Justin Johnson's original Torch implementation](https://github.com/jcjohnson/neural-style) and Gatys's [Lua-based spatial control code](https://github.com/leongatys/NeuralImageSynthesis), with some extra features added including generating masks, & creating videos, including creating loops.
+
+# neural-style-pt (original documentation)
 
 This is a PyTorch implementation of the paper [A Neural Algorithm of Artistic Style](http://arxiv.org/abs/1508.06576)
 by Leon A. Gatys, Alexander S. Ecker, and Matthias Bethge. The code is based on Justin Johnson's [Neural-Style](https://github.com/jcjohnson/neural-style).
