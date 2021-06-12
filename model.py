@@ -7,6 +7,9 @@ import torch.optim as optim
 from CaffeLoader import loadCaffemodel
 from utils import *
 
+blur_input = None
+maxpool2d_blurred_layer = None
+
 
 default_tv_weight = 1e-3
 default_content_weight = 5e0
@@ -77,6 +80,10 @@ class StyleNet(torch.nn.Module):
         self.style_stat = default_style_stat
         self.normalize_gradients = default_normalize_gradients
         self.save_parameters()
+        
+        global maxpool2d_blurred_layer
+        if maxpool2d_blurred_layer is None:
+            maxpool2d_blurred_layer = MaxPool2d(kernel_size=2, stride=2)
 
         content_layers = params.content_layers.split(',')
         style_layers = params.style_layers.split(',')
@@ -789,18 +796,17 @@ class GaussianBlur(nn.Module):
         x = torch.nn.functional.conv2d(x, weight=weight, groups=groups)
         return x
 
-blur_input = GaussianBlur(6, sigma = 0.25)
 
 class MaxPool2d(torch.nn.MaxPool2d):
     def forward(self, x):
+        global blur_input
+        if blur_input is None:
+            blur_input = GaussianBlur(6, sigma = 0.25)        
         x = blur_input(x)
         x = x.unfold(2, self.kernel_size, self.stride).unfold(3, self.kernel_size, self.stride)
         x = x.contiguous().view(x.size()[:4] + (-1,))
         pool, _ = torch.max(x, dim=-1)
         return pool
-
-maxpool2d_blurred_layer = MaxPool2d(kernel_size=2, stride=2)
-
 
 
 ######################################################
