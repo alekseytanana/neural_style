@@ -1,3 +1,4 @@
+from tqdm import tqdm
 import torch
 from model import *
 from utils import *
@@ -18,10 +19,11 @@ def optimize(stylenet,
              img, 
              num_iterations, 
              update_iter=250, 
-             display_preview=False, 
              save_preview=False, 
              save_preview_path=None,
-             clear_output=True):
+             clear_output=True,
+             pbar=None):
+
 
     def iterate_optimizer():
         t[0] += 1
@@ -30,7 +32,7 @@ def optimize(stylenet,
         stylenet(img)
         loss = stylenet.get_loss()
         loss.backward()
-        
+
         if update_iter is not None:
             maybe_update(stylenet, t[0], update_iter, num_iterations, loss)
             if t[0] % update_iter == 0 or t[0]==0:
@@ -38,21 +40,28 @@ def optimize(stylenet,
         if save_preview:
             maybe_save_preview(img, t[0], update_iter, num_iterations, save_preview_path)
 
+        if pbar:
+            pbar.update(1)        
+
         return loss
-    
+
     img = nn.Parameter(img.type(stylenet.dtype))
     optimizer, loopVal = setup_optimizer(img, stylenet.params, num_iterations, verbose=False)
     t = [0]
     while t[0] <= loopVal:
         optimizer.step(iterate_optimizer)
-    
+        
     if update_iter is not None and clear_output:
         IPython.display.clear_output()   
     
     return img
 
 
-def style_transfer(stylenet, config, img=None, verbose=False):
+def style_transfer(stylenet, 
+                   config, 
+                   img=None, 
+                   verbose=False):
+    
     cfg = EasyDict(config)
 
     cfg.size = cfg.size if 'size' in cfg else 512
@@ -149,39 +158,41 @@ def style_transfer(stylenet, config, img=None, verbose=False):
     stylenet.set_style_statistic(cfg.style_stat)
     stylenet.set_normalize_gradients(cfg.normalize_gradients)
 
-    # go through each octave
-    for image_size, num_iterations, style_scale in zip(image_sizes, cfg.num_iterations, cfg.style_scale):
+    with tqdm(total=sum(cfg.num_iterations)) as pbar:
 
-        # rescale main image
-        img = resize_tensor(img, image_size)        
-        
-        # reload content, style, and mask images at scale
-        content_image = resize(content_image_orig, image_size)
-        style_images = [resize(image, (int(max(image_size) * style_scale), 
-                                       int(max(image_size) * style_scale / aspect))) 
-                        for image, aspect in zip(style_images_orig, style_images_aspect)]
-        
-        # produce masks at current octave size
-        if content_masks_orig is not None:
-            content_masks = [resize(mask, image_size) 
-                             for mask in content_masks_orig]
-        else:
-            content_masks = None
+        # go through each octave
+        for image_size, num_iterations, style_scale in zip(image_sizes, cfg.num_iterations, cfg.style_scale):
 
-        # capture the style and content images
-        stylenet.capture(content_image, 
-                         style_images, 
-                         cfg.style_blend_weights, 
-                         content_masks)
+            # rescale main image
+            img = resize_tensor(img, image_size)        
 
-        # optimize
-        img = optimize(stylenet, 
-                       img, 
-                       num_iterations=num_iterations,  
-                       update_iter=100, 
-                       display_preview=True,
-                       save_preview=False,
-                       save_preview_path='results/preview/preview.png')
+            # reload content, style, and mask images at scale
+            content_image = resize(content_image_orig, image_size)
+            style_images = [resize(image, (int(max(image_size) * style_scale), 
+                                           int(max(image_size) * style_scale / aspect))) 
+                            for image, aspect in zip(style_images_orig, style_images_aspect)]
+
+            # produce masks at current octave size
+            if content_masks_orig is not None:
+                content_masks = [resize(mask, image_size) 
+                                 for mask in content_masks_orig]
+            else:
+                content_masks = None
+
+            # capture the style and content images
+            stylenet.capture(content_image, 
+                             style_images, 
+                             cfg.style_blend_weights, 
+                             content_masks)
+
+            # optimize
+            img = optimize(stylenet, 
+                           img, 
+                           num_iterations=num_iterations,  
+                           update_iter=None, 
+                           save_preview=False,
+                           save_preview_path='results/preview/preview.png',
+                           pbar=pbar)
     
     # tensor to PIL
     img = deprocess(img)

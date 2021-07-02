@@ -6,4 +6,4 @@ scipy
 numpy
 opencv-python
 imageio
-
+tqdm
