@@ -46,6 +46,7 @@ def mask_to_image(mask):
 
 
 def get_size(image):
+    w, h = 0, 0
     if isinstance(image, str):
         image = load_image(image, 1024)
         w, h = image.size
